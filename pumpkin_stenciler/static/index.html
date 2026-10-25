@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pumpkin Stenciler</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>🎃 Pumpkin Stenciler</h1>
+    <p>Turn any image into a jack-o'-lantern carving stencil.</p>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <label id="dropzone" class="dropzone" for="file-input">
+        <input id="file-input" type="file" accept="image/*,application/pdf,.pdf" multiple hidden>
+        <span class="dropzone-icon" aria-hidden="true">⬆</span>
+        <strong>Drop images or PDFs here</strong>
+        <span class="muted">or click to browse · up to 25 MB each</span>
+      </label>
+
+      <ul id="upload-status" class="upload-status" aria-live="polite"></ul>
+
+      <h2 class="section-title">Your uploads</h2>
+      <ul id="upload-list" class="upload-list"></ul>
+      <p id="empty-list" class="muted empty">Nothing uploaded yet.</p>
+    </aside>
+
+    <section id="viewer" class="viewer" hidden>
+      <div class="viewer-header">
+        <div>
+          <h2 id="viewer-title"></h2>
+          <p id="viewer-meta" class="muted"></p>
+        </div>
+        <button id="delete-btn" class="btn btn-danger" type="button">Delete</button>
+      </div>
+
+      <div id="page-strip" class="page-strip" hidden></div>
+
+      <div class="preview">
+        <img id="preview-img" alt="Selected page">
+      </div>
+    </section>
+
+    <section id="placeholder" class="viewer placeholder">
+      <p class="muted">Upload an image or PDF to get started.</p>
+    </section>
+  </main>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>
