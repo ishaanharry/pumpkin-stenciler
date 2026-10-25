@@ -40,8 +40,46 @@
 
       <div id="page-strip" class="page-strip" hidden></div>
 
-      <div class="preview">
-        <img id="preview-img" alt="Selected page">
+      <div class="workspace">
+        <div class="preview-pane">
+          <div class="view-tabs" role="tablist" aria-label="Preview">
+            <button id="tab-original" type="button" role="tab">Original</button>
+            <button id="tab-segmented" type="button" role="tab">Segmented</button>
+          </div>
+          <div class="preview">
+            <img id="preview-img" alt="Selected page">
+          </div>
+        </div>
+
+        <div class="edit-panel">
+          <h3>Segment by brightness</h3>
+          <p class="muted hint">Reduce the image to flat shades. Black is uncarved skin, white is cut all the way through, grays are shaved partway.</p>
+
+          <div class="field">
+            <span class="field-label" id="shades-label">Shades</span>
+            <div id="shade-buttons" class="segmented-control" role="radiogroup" aria-labelledby="shades-label"></div>
+            <p id="shades-desc" class="muted hint"></p>
+          </div>
+
+          <label class="field toggle">
+            <input id="invert-toggle" type="checkbox">
+            <span>
+              <span class="field-label">Flip colors</span>
+              <span class="muted hint">Swap dark and light, e.g. to carve a dark subject instead of the background.</span>
+            </span>
+          </label>
+
+          <div class="field">
+            <span class="field-label">Brightness thresholds</span>
+            <canvas id="histogram" class="histogram" width="512" height="120" aria-label="Brightness histogram with threshold bands"></canvas>
+            <div id="threshold-sliders" class="threshold-sliders"></div>
+          </div>
+
+          <div class="edit-actions">
+            <button id="reset-btn" class="btn" type="button">Reset thresholds</button>
+            <a id="download-btn" class="btn" download>Download PNG</a>
+          </div>
+        </div>
       </div>
     </section>
 
