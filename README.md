@@ -15,3 +15,13 @@ Images (PNG, JPEG, WebP, GIF, ...) and PDFs up to 25 MB can be uploaded by
 drag-and-drop, the file picker, or pasting from the clipboard. Every upload is
 normalised into PNG pages under `data/uploads/<id>/`: an image becomes one
 page, a PDF becomes one page per PDF page (max 20).
+
+## Stencil pipeline
+
+1. **Segment** (`segment.py`): reduce a page to 2-5 flat shades of gray by
+   brightness thresholds, optionally flipped.
+2. **Vectorize** (`vectorize.py`): trace the segmented shades into a stacked
+   SVG with [vtracer](https://github.com/visioncortex/vtracer). The SVG has a
+   background `<rect>` plus one `<g id="shade-N">` per threshold, each holding
+   everything at or above that brightness, so the layers stack without gaps.
+   Small blobs and holes are removed before tracing ("Remove specks").

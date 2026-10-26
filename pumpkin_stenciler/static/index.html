@@ -45,9 +45,11 @@
           <div class="view-tabs" role="tablist" aria-label="Preview">
             <button id="tab-original" type="button" role="tab">Original</button>
             <button id="tab-segmented" type="button" role="tab">Segmented</button>
+            <button id="tab-svg" type="button" role="tab">SVG</button>
           </div>
           <div class="preview">
             <img id="preview-img" alt="Selected page">
+            <p id="preview-error" class="preview-error" role="alert" hidden></p>
           </div>
         </div>
 
@@ -78,6 +80,31 @@
           <div class="edit-actions">
             <button id="reset-btn" class="btn" type="button">Reset thresholds</button>
             <a id="download-btn" class="btn" download>Download PNG</a>
+          </div>
+
+          <h3 class="panel-section">Vectorize</h3>
+          <p class="muted hint">Trace the shades into smooth SVG shapes for printing or cutting.</p>
+
+          <div class="field">
+            <label class="slider-row">
+              <span class="field-label">Remove specks</span>
+              <input id="speckle-input" type="range" min="0" max="100">
+              <output id="speckle-output"></output>
+            </label>
+            <p class="muted hint">Drops blobs and fills holes smaller than this many pixels across. Tiny pieces are hard to carve.</p>
+          </div>
+
+          <div class="field">
+            <label class="slider-row">
+              <span class="field-label">Smoothness</span>
+              <input id="smoothness-input" type="range" min="0" max="100">
+              <output id="smoothness-output"></output>
+            </label>
+            <p class="muted hint">Higher rounds off corners and small wiggles.</p>
+          </div>
+
+          <div class="edit-actions">
+            <a id="download-svg-btn" class="btn" download>Download SVG</a>
           </div>
         </div>
       </div>

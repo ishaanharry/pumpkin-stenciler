@@ -1,12 +1,12 @@
 import io
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import segment, uploads
+from . import segment, uploads, vectorize
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -64,21 +64,45 @@ def get_segmented(upload_id: str, page: int, thresholds: str, invert: bool = Fal
 
     With invert=true the shades are flipped: dark areas become white and vice versa.
     """
-    try:
-        parsed = segment.parse_thresholds(thresholds)
-    except segment.SegmentError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    parsed = _parse_thresholds(thresholds)
     with _open_page(upload_id, page) as image:
         result = segment.segment(image, parsed, invert)
     buffer = io.BytesIO()
     # Speed matters more than file size here: this is re-rendered as sliders move.
     result.save(buffer, format="PNG", compress_level=1)
-    return Response(
-        buffer.getvalue(),
-        media_type="image/png",
-        # Pages never change once uploaded, so a given URL is always the same image.
-        headers={"Cache-Control": "private, max-age=3600"},
-    )
+    return Response(buffer.getvalue(), media_type="image/png", headers=_CACHE_HEADERS)
+
+
+@app.get("/api/uploads/{upload_id}/pages/{page}/svg")
+def get_svg(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    invert: bool = False,
+    speckle: int = Query(vectorize.DEFAULT_SPECKLE, ge=0, le=vectorize.MAX_SPECKLE),
+    smoothness: int = Query(
+        vectorize.DEFAULT_SMOOTHNESS, ge=0, le=vectorize.MAX_SMOOTHNESS
+    ),
+):
+    """The segmented page traced to a stacked SVG, one <g> per shade."""
+    parsed = _parse_thresholds(thresholds)
+    with _open_page(upload_id, page) as image:
+        try:
+            svg = vectorize.vectorize(image, parsed, invert, speckle, smoothness)
+        except vectorize.VectorizeError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    return Response(svg, media_type="image/svg+xml", headers=_CACHE_HEADERS)
+
+
+# Pages never change once uploaded, so a given URL always yields the same result.
+_CACHE_HEADERS = {"Cache-Control": "private, max-age=3600"}
+
+
+def _parse_thresholds(raw: str) -> list[int]:
+    try:
+        return segment.parse_thresholds(raw)
+    except segment.SegmentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _open_page(upload_id: str, page: int) -> Image.Image:

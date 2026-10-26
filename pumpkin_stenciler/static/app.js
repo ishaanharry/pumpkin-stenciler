@@ -11,22 +11,28 @@ const pageStrip = $("page-strip");
 const previewImg = $("preview-img");
 const tabOriginal = $("tab-original");
 const tabSegmented = $("tab-segmented");
+const tabSvg = $("tab-svg");
+const preview = previewImg.parentElement;
 const shadeButtons = $("shade-buttons");
 const histogramCanvas = $("histogram");
 const thresholdSliders = $("threshold-sliders");
 const downloadBtn = $("download-btn");
 const invertToggle = $("invert-toggle");
+const downloadSvgBtn = $("download-svg-btn");
 
 // Mirrors MIN_SHADES / MAX_SHADES in segment.py.
 const MIN_SHADES = 2;
 const MAX_SHADES = 5;
+// Mirrors DEFAULT_SPECKLE / DEFAULT_SMOOTHNESS in vectorize.py.
+const DEFAULT_SPECKLE = 8;
+const DEFAULT_SMOOTHNESS = 25;
 
 // The currently selected source: { upload, page }. Later stencil steps read this.
 const state = {
   uploads: [],
   upload: null,
   page: 1,
-  view: "segmented", // "original" | "segmented"
+  view: "segmented", // "original" | "segmented" | "svg"
   // Segmentation settings per page, keyed by `${uploadId}:${page}`.
   settings: new Map(),
   histograms: new Map(),
@@ -183,26 +189,66 @@ function setView(view) {
   renderPreview();
 }
 
+// After a segmentation change, make sure the preview shows its effect. The SVG
+// view reflects segmentation too, so it stays put.
+function showProcessed() {
+  if (state.view === "original") state.view = "segmented";
+}
+
 tabOriginal.addEventListener("click", () => setView("original"));
 tabSegmented.addEventListener("click", () => setView("segmented"));
+tabSvg.addEventListener("click", () => setView("svg"));
 
 function pageUrl() {
   return state.upload.pages[state.page - 1];
 }
 
-function segmentedUrl() {
+function segmentationQuery() {
   const s = currentSettings();
   const invert = s.invert ? "&invert=true" : "";
-  return `${pageUrl()}/segmented?thresholds=${s.thresholds.join(",")}${invert}`;
+  return `thresholds=${s.thresholds.join(",")}${invert}`;
+}
+
+function segmentedUrl() {
+  return `${pageUrl()}/segmented?${segmentationQuery()}`;
+}
+
+function svgUrl() {
+  const s = currentSettings();
+  return `${pageUrl()}/svg?${segmentationQuery()}&speckle=${s.speckle}&smoothness=${s.smoothness}`;
 }
 
 function renderPreview() {
   tabOriginal.setAttribute("aria-selected", String(state.view === "original"));
   tabSegmented.setAttribute("aria-selected", String(state.view === "segmented"));
-  const src = state.view === "segmented" ? segmentedUrl() : pageUrl();
+  tabSvg.setAttribute("aria-selected", String(state.view === "svg"));
+  const src = { original: pageUrl, segmented: segmentedUrl, svg: svgUrl }[state.view]();
   // Compare against the attribute: `.src` is normalised to an absolute URL.
-  if (previewImg.getAttribute("src") !== src) previewImg.src = src;
+  if (previewImg.getAttribute("src") !== src) {
+    preview.classList.add("loading");
+    previewImg.src = src;
+  }
 }
+
+const previewError = $("preview-error");
+
+previewImg.addEventListener("load", () => {
+  preview.classList.remove("loading");
+  previewImg.hidden = false;
+  previewError.hidden = true;
+});
+
+// An <img> can't read the error body, so fetch it to show the server's reason.
+previewImg.addEventListener("error", async () => {
+  const src = previewImg.getAttribute("src");
+  const res = await fetch(src).catch(() => null);
+  const data = await res?.json().catch(() => ({}));
+  if (previewImg.getAttribute("src") !== src) return; // superseded meanwhile
+  preview.classList.remove("loading");
+  previewImg.hidden = true;
+  previewError.hidden = false;
+  previewError.textContent = data?.detail || "The preview couldn't be generated.";
+});
 
 // Slider drags fire many input events; only fetch the image once they settle.
 let previewTimer = null;
@@ -233,6 +279,8 @@ function currentSettings() {
       shades: MIN_SHADES,
       thresholds: defaultThresholds(MIN_SHADES),
       invert: false,
+      speckle: DEFAULT_SPECKLE,
+      smoothness: DEFAULT_SMOOTHNESS,
     });
   }
   return state.settings.get(key);
@@ -242,7 +290,7 @@ function setShades(shades) {
   const s = currentSettings();
   s.shades = shades;
   s.thresholds = defaultThresholds(shades);
-  state.view = "segmented";
+  showProcessed();
   renderEditor();
   renderPreview();
 }
@@ -251,10 +299,23 @@ $("reset-btn").addEventListener("click", () => setShades(currentSettings().shade
 
 invertToggle.addEventListener("change", () => {
   currentSettings().invert = invertToggle.checked;
-  state.view = "segmented";
+  showProcessed();
   renderEditor();
   renderPreview();
 });
+
+for (const [name, input, output] of [
+  ["speckle", $("speckle-input"), $("speckle-output")],
+  ["smoothness", $("smoothness-input"), $("smoothness-output")],
+]) {
+  input.addEventListener("input", () => {
+    currentSettings()[name] = Number(input.value);
+    output.textContent = input.value;
+    state.view = "svg";
+    updateDownload();
+    schedulePreview();
+  });
+}
 
 function describeShades(shades) {
   const grays = shades - 2;
@@ -279,6 +340,8 @@ function renderEditor() {
   );
   $("shades-desc").textContent = describeShades(s.shades);
   invertToggle.checked = s.invert;
+  $("speckle-input").value = $("speckle-output").textContent = s.speckle;
+  $("smoothness-input").value = $("smoothness-output").textContent = s.smoothness;
 
   const shades = shadeValues(s.shades, s.invert);
   thresholdSliders.replaceChildren(
@@ -309,7 +372,7 @@ function renderEditor() {
         input.value = v;
         output.textContent = v;
         s.thresholds[i] = v;
-        state.view = "segmented";
+        showProcessed();
         drawHistogram();
         updateDownload();
         schedulePreview();
@@ -329,6 +392,8 @@ function updateDownload() {
   const suffix = state.upload.page_count > 1 ? `-p${state.page}` : "";
   downloadBtn.href = segmentedUrl();
   downloadBtn.download = `${base}${suffix}-segmented.png`;
+  downloadSvgBtn.href = svgUrl();
+  downloadSvgBtn.download = `${base}${suffix}-stencil.svg`;
 }
 
 // ---- Histogram ----------------------------------------------------------

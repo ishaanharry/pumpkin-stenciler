@@ -300,6 +300,31 @@ h1, h2 { margin: 0; line-height: 1.2; }
 .threshold-row input { width: 100%; accent-color: var(--accent); }
 .threshold-row output { text-align: right; font-variant-numeric: tabular-nums; }
 
+.edit-panel .panel-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr 36px;
+  align-items: center;
+  column-gap: 8px;
+}
+.slider-row .field-label { grid-column: 1 / -1; }
+.slider-row input { width: 100%; accent-color: var(--accent); }
+.slider-row output { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.preview.loading img { opacity: .5; transition: opacity .2s; }
+.preview-error {
+  max-width: 40ch;
+  margin: 0;
+  padding: 40px 0;
+  color: var(--danger);
+  text-align: center;
+}
+
 .edit-actions {
   display: flex;
   flex-wrap: wrap;
