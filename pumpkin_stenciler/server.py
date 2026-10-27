@@ -1,21 +1,35 @@
+import base64
 import io
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import segment, uploads, vectorize
+from . import segment, uploads, validate, vectorize
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="Pumpkin Stenciler")
 
+# The frontend files change whenever the app does. Without this, browsers may
+# reuse a stale cached app.js alongside a fresh index.html. "no-cache" still
+# lets them keep a copy, but they revalidate it (cheaply, via ETag) each load.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class _RevalidatedStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(_NO_CACHE)
+        return response
+
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers=_NO_CACHE)
 
 
 # Plain `def` endpoints run in FastAPI's threadpool, so image decoding and
@@ -94,6 +108,36 @@ def get_svg(
     return Response(svg, media_type="image/svg+xml", headers=_CACHE_HEADERS)
 
 
+@app.get("/api/uploads/{upload_id}/pages/{page}/islands")
+def get_islands(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    invert: bool = False,
+    speckle: int = Query(vectorize.DEFAULT_SPECKLE, ge=0, le=vectorize.MAX_SPECKLE),
+):
+    """Unsupported pieces in the stencil, i.e. material enclosed by black cuts.
+
+    overlay is a data: URL of a transparent PNG highlighting them, or null.
+    """
+    parsed = _parse_thresholds(thresholds)
+    with _open_page(upload_id, page) as image:
+        report = validate.find_islands(image, parsed, invert, speckle)
+    overlay = None
+    if report.overlay:
+        overlay = "data:image/png;base64," + base64.b64encode(report.overlay).decode()
+    return JSONResponse(
+        {
+            "valid": report.valid,
+            "width": report.width,
+            "height": report.height,
+            "islands": [asdict(i) for i in report.islands],
+            "overlay": overlay,
+        },
+        headers=_CACHE_HEADERS,
+    )
+
+
 # Pages never change once uploaded, so a given URL always yields the same result.
 _CACHE_HEADERS = {"Cache-Control": "private, max-age=3600"}
 
@@ -118,4 +162,4 @@ def delete_upload(upload_id: str):
         raise HTTPException(status_code=404, detail="Upload not found.")
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", _RevalidatedStaticFiles(directory=STATIC_DIR), name="static")

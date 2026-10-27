@@ -58,8 +58,8 @@ def vectorize(
         f'viewBox="0 0 {width} {height}">',
         f'<rect id="shade-0" width="{width}" height="{height}" fill="{_hex(shades[0])}"/>',
     ]
-    for level, threshold in enumerate(thresholds, start=1):
-        layer = _despeckle(gray >= threshold, speckle)
+    layers = shade_layers(gray, thresholds, speckle)
+    for level, (threshold, layer) in enumerate(zip(thresholds, layers), start=1):
         paths = _trace(layer, smoothness)
         parts.append(
             f'<g id="shade-{level}" data-min-brightness="{threshold}" '
@@ -74,6 +74,30 @@ def vectorize(
         parts.append("</g>")
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def shade_layers(
+    gray: np.ndarray, thresholds: list[int], speckle: int
+) -> list[np.ndarray]:
+    """The masks traced into the SVG's shade groups, bottom to top.
+
+    Layer k covers pixels at or above thresholds[k], with specks removed.
+    Pixels covered by no layer show the background shade.
+    """
+    return [_despeckle(gray >= t, speckle) for t in thresholds]
+
+
+def shade_levels(
+    gray: np.ndarray, thresholds: list[int], speckle: int
+) -> np.ndarray:
+    """Per-pixel shade index of the stacked SVG (0 = background).
+
+    Later layers paint over earlier ones, exactly as the SVG renders.
+    """
+    levels = np.zeros(gray.shape, dtype=np.uint8)
+    for level, layer in enumerate(shade_layers(gray, thresholds, speckle), start=1):
+        levels[layer] = level
+    return levels
 
 
 def _despeckle(layer: np.ndarray, speckle: int) -> np.ndarray:

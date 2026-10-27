@@ -42,13 +42,20 @@
 
       <div class="workspace">
         <div class="preview-pane">
-          <div class="view-tabs" role="tablist" aria-label="Preview">
-            <button id="tab-original" type="button" role="tab">Original</button>
-            <button id="tab-segmented" type="button" role="tab">Segmented</button>
-            <button id="tab-svg" type="button" role="tab">SVG</button>
+          <div class="preview-toolbar">
+            <div class="view-tabs" role="tablist" aria-label="Preview">
+              <button id="tab-original" type="button" role="tab">Original</button>
+              <button id="tab-segmented" type="button" role="tab">Segmented</button>
+              <button id="tab-svg" type="button" role="tab">SVG</button>
+            </div>
+            <span id="check-badge" class="badge" hidden></span>
           </div>
           <div class="preview">
-            <img id="preview-img" alt="Selected page">
+            <div id="preview-stack" class="preview-stack">
+              <img id="preview-img" alt="Selected page">
+              <img id="island-overlay" class="island-overlay" alt="" hidden>
+              <div id="island-boxes" class="island-boxes"></div>
+            </div>
             <p id="preview-error" class="preview-error" role="alert" hidden></p>
           </div>
         </div>
@@ -106,6 +113,15 @@
           <div class="edit-actions">
             <a id="download-svg-btn" class="btn" download>Download SVG</a>
           </div>
+
+          <h3 class="panel-section">Check stencil</h3>
+          <p class="muted hint">Finds pieces of pumpkin that would fall out because black cut-outs surround them completely.</p>
+          <p id="check-status" class="check-status" aria-live="polite"></p>
+          <label id="highlight-field" class="field toggle" hidden>
+            <input id="highlight-toggle" type="checkbox" checked>
+            <span class="field-label">Highlight unsupported pieces</span>
+          </label>
+          <ol id="island-list" class="island-list"></ol>
         </div>
       </div>
     </section>

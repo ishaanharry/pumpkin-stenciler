@@ -25,3 +25,9 @@ page, a PDF becomes one page per PDF page (max 20).
    background `<rect>` plus one `<g id="shade-N">` per threshold, each holding
    everything at or above that brightness, so the layers stack without gaps.
    Small blobs and holes are removed before tracing ("Remove specks").
+3. **Check** (`validate.py`): find unsupported pieces, i.e. material that
+   would fall out. Black is always the cut-through color; white (skin) and
+   grays (shaved) are material. Any region of material not connected to the
+   stencil's edge, through edge-sharing pixels rather than diagonal corners,
+   is enclosed by cuts and gets flagged. It runs on the same speck-cleaned
+   layers the SVG is traced from.

@@ -12,7 +12,8 @@ const previewImg = $("preview-img");
 const tabOriginal = $("tab-original");
 const tabSegmented = $("tab-segmented");
 const tabSvg = $("tab-svg");
-const preview = previewImg.parentElement;
+const preview = document.querySelector(".preview");
+const previewStack = $("preview-stack");
 const shadeButtons = $("shade-buttons");
 const histogramCanvas = $("histogram");
 const thresholdSliders = $("threshold-sliders");
@@ -36,6 +37,7 @@ const state = {
   // Segmentation settings per page, keyed by `${uploadId}:${page}`.
   settings: new Map(),
   histograms: new Map(),
+  highlightIslands: true,
 };
 
 // ---- Uploading ----------------------------------------------------------
@@ -228,13 +230,14 @@ function renderPreview() {
     preview.classList.add("loading");
     previewImg.src = src;
   }
+  runCheck();
 }
 
 const previewError = $("preview-error");
 
 previewImg.addEventListener("load", () => {
   preview.classList.remove("loading");
-  previewImg.hidden = false;
+  previewStack.hidden = false;
   previewError.hidden = true;
 });
 
@@ -245,10 +248,107 @@ previewImg.addEventListener("error", async () => {
   const data = await res?.json().catch(() => ({}));
   if (previewImg.getAttribute("src") !== src) return; // superseded meanwhile
   preview.classList.remove("loading");
-  previewImg.hidden = true;
+  previewStack.hidden = true;
   previewError.hidden = false;
   previewError.textContent = data?.detail || "The preview couldn't be generated.";
 });
+
+// ---- Stencil check ------------------------------------------------------
+
+const checkBadge = $("check-badge");
+const checkStatus = $("check-status");
+const islandOverlay = $("island-overlay");
+const islandBoxes = $("island-boxes");
+const islandList = $("island-list");
+const highlightField = $("highlight-field");
+const highlightToggle = $("highlight-toggle");
+const MAX_LISTED_ISLANDS = 10;
+
+let checkUrl = null;
+let checkResult = null;
+
+highlightToggle.addEventListener("change", () => {
+  state.highlightIslands = highlightToggle.checked;
+  renderCheck();
+});
+
+// Runs whenever the preview updates; skipped if nothing that affects it changed.
+async function runCheck() {
+  const s = currentSettings();
+  const url = `${pageUrl()}/islands?${segmentationQuery()}&speckle=${s.speckle}`;
+  if (url === checkUrl) return;
+  checkUrl = url;
+  checkStatus.className = "check-status";
+  checkStatus.textContent = "Checking…";
+
+  const res = await fetch(url).catch(() => null);
+  const data = res?.ok ? await res.json() : null;
+  if (url !== checkUrl) return; // settings changed while this was running
+  checkResult = data;
+  renderCheck();
+}
+
+function renderCheck() {
+  const r = checkResult;
+  const count = r?.islands.length ?? 0;
+
+  checkBadge.hidden = !r;
+  checkStatus.className = `check-status ${r ? (r.valid ? "ok" : "bad") : ""}`;
+  if (!r) {
+    checkStatus.textContent = "The stencil couldn't be checked.";
+  } else if (r.valid) {
+    checkBadge.className = "badge ok";
+    checkBadge.textContent = "✓ No unsupported pieces";
+    checkStatus.textContent = "✓ Every piece of pumpkin stays attached.";
+  } else {
+    const pieces = `${count} unsupported piece${count === 1 ? "" : "s"}`;
+    checkBadge.className = "badge bad";
+    checkBadge.textContent = `⚠ ${pieces}`;
+    checkStatus.textContent = `⚠ ${pieces} would fall out.`;
+  }
+
+  const show = !!r && !r.valid && state.highlightIslands;
+  highlightField.hidden = !r || r.valid;
+  highlightToggle.checked = state.highlightIslands;
+  islandOverlay.hidden = !show;
+  if (show) islandOverlay.src = r.overlay;
+
+  islandBoxes.replaceChildren(
+    ...(show ? r.islands : []).map((island, i) => {
+      const box = document.createElement("div");
+      box.className = "island-box";
+      box.dataset.index = i;
+      Object.assign(box.style, {
+        left: `${(island.x / r.width) * 100}%`,
+        top: `${(island.y / r.height) * 100}%`,
+        width: `${(island.width / r.width) * 100}%`,
+        height: `${(island.height / r.height) * 100}%`,
+      });
+      return box;
+    }),
+  );
+
+  const listed = r && !r.valid ? r.islands.slice(0, MAX_LISTED_ISLANDS) : [];
+  islandList.replaceChildren(
+    ...listed.map((island, i) => {
+      const li = document.createElement("li");
+      li.textContent = `${island.width}×${island.height} px (${island.area.toLocaleString()} px²)`;
+      // Hovering a list entry picks out its box on the preview.
+      li.addEventListener("mouseenter", () => setActiveBox(i, true));
+      li.addEventListener("mouseleave", () => setActiveBox(i, false));
+      return li;
+    }),
+  );
+  if (count > listed.length) {
+    const more = document.createElement("li");
+    more.textContent = `…and ${count - listed.length} smaller`;
+    islandList.append(more);
+  }
+}
+
+function setActiveBox(index, active) {
+  islandBoxes.querySelector(`[data-index="${index}"]`)?.classList.toggle("active", active);
+}
 
 // Slider drags fire many input events; only fetch the image once they settle.
 let previewTimer = null;

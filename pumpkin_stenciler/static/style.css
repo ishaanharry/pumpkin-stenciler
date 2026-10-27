@@ -199,9 +199,25 @@ h1, h2 { margin: 0; line-height: 1.2; }
   .workspace { grid-template-columns: 1fr; }
 }
 
+.preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.badge.ok { background: rgba(70, 180, 100, .18); color: #7ddc95; }
+.badge.bad { background: rgba(229, 83, 75, .18); color: #ff8a83; }
+
 .view-tabs {
   display: inline-flex;
-  margin-bottom: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -332,11 +348,46 @@ h1, h2 { margin: 0; line-height: 1.2; }
   margin-top: 16px;
 }
 a.btn { text-decoration: none; }
-.preview img {
+/* The overlay and boxes sit exactly on top of the preview image. */
+.preview-stack {
+  position: relative;
+  max-width: 100%;
+}
+.preview-stack > #preview-img {
+  display: block;
   max-width: 100%;
   max-height: 70vh;
   border-radius: 4px;
 }
+.island-overlay,
+.island-boxes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.island-box {
+  position: absolute;
+  /* Padding keeps tiny pieces visible at reduced zoom. */
+  outline: 2px solid #ff3030;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.island-box.active { outline-width: 4px; outline-color: #ffd23f; }
+
+.check-status { margin: 10px 0 0; font-size: 14px; font-weight: 600; }
+.check-status.ok { color: #7ddc95; }
+.check-status.bad { color: #ff8a83; }
+
+.island-list {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.island-list li { padding: 2px 0; cursor: default; }
+.island-list li:hover { color: var(--text); }
 
 .btn {
   padding: 6px 14px;
