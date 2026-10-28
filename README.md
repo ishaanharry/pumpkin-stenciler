@@ -31,3 +31,11 @@ page, a PDF becomes one page per PDF page (max 20).
    stencil's edge, through edge-sharing pixels rather than diagonal corners,
    is enclosed by cuts and gets flagged. It runs on the same speck-cleaned
    layers the SVG is traced from.
+
+   Given the printed stencil width and a minimum bridge width, it also flags
+   *fragile* pieces: connected, but only through bridges narrower than the
+   minimum. The material is eroded by half the minimum width (via a
+   Euclidean distance transform); pieces whose eroded core no longer reaches
+   the edge hang by thin bridges, which are highlighted. Thin dead ends are
+   ignored, since losing one doesn't drop a piece. PDFs default to their
+   physical page width; images default to 8 in.

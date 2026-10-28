@@ -259,95 +259,205 @@ const checkBadge = $("check-badge");
 const checkStatus = $("check-status");
 const islandOverlay = $("island-overlay");
 const islandBoxes = $("island-boxes");
-const islandList = $("island-list");
+const pieceLists = $("piece-lists");
 const highlightField = $("highlight-field");
 const highlightToggle = $("highlight-toggle");
-const MAX_LISTED_ISLANDS = 10;
+const checkLegend = $("check-legend");
+const stencilWidthInput = $("stencil-width");
+const minBridgeInput = $("min-bridge");
+const unitSelect = $("unit-select");
+const MAX_LISTED_PIECES = 8;
+
+const MM_PER_UNIT = { in: 25.4, cm: 10 };
+// Defaults for images, which have no physical size; PDFs use their page width.
+const DEFAULT_WIDTH_MM = 8 * 25.4;
+const DEFAULT_MIN_BRIDGE_MM = 6.35; // ¼ in
 
 let checkUrl = null;
 let checkResult = null;
+
+// The unit is a per-viewer preference, so remember it across visits.
+try {
+  state.unit = localStorage.getItem("unit") === "cm" ? "cm" : "in";
+} catch {
+  state.unit = "in";
+}
+
+function toUnit(mm) {
+  return String(Math.round((mm / MM_PER_UNIT[state.unit]) * 100) / 100);
+}
+
+function renderSizeFields() {
+  const s = currentSettings();
+  unitSelect.value = state.unit;
+  stencilWidthInput.value = toUnit(s.widthMm);
+  minBridgeInput.value = toUnit(s.minBridgeMm);
+  $("min-bridge-unit").textContent = state.unit;
+}
+
+unitSelect.addEventListener("change", () => {
+  state.unit = unitSelect.value;
+  try {
+    localStorage.setItem("unit", state.unit);
+  } catch {}
+  renderSizeFields();
+  renderCheck();
+});
+
+for (const [input, key, min] of [
+  [stencilWidthInput, "widthMm", 0.1],
+  [minBridgeInput, "minBridgeMm", 0],
+]) {
+  input.addEventListener("input", () => {
+    const value = Number(input.value);
+    if (input.value === "" || !(value >= min)) return; // leave the last valid value
+    currentSettings()[key] = value * MM_PER_UNIT[state.unit];
+    scheduleCheck();
+  });
+  // Tidy up rejected or unrounded entries once the field is left.
+  input.addEventListener("change", renderSizeFields);
+}
 
 highlightToggle.addEventListener("change", () => {
   state.highlightIslands = highlightToggle.checked;
   renderCheck();
 });
 
+let checkTimer = null;
+function scheduleCheck() {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(runCheck, 300);
+}
+
 // Runs whenever the preview updates; skipped if nothing that affects it changed.
 async function runCheck() {
   const s = currentSettings();
-  const url = `${pageUrl()}/islands?${segmentationQuery()}&speckle=${s.speckle}`;
+  const url =
+    `${pageUrl()}/check?${segmentationQuery()}&speckle=${s.speckle}` +
+    `&width_mm=${s.widthMm.toFixed(2)}&min_bridge_mm=${s.minBridgeMm.toFixed(2)}`;
   if (url === checkUrl) return;
   checkUrl = url;
-  checkStatus.className = "check-status";
-  checkStatus.textContent = "Checking…";
+  checkStatus.replaceChildren(statusLine("", "Checking…"));
 
   const res = await fetch(url).catch(() => null);
   const data = res?.ok ? await res.json() : null;
   if (url !== checkUrl) return; // settings changed while this was running
-  checkResult = data;
+  checkResult = data && { ...data, widthMm: s.widthMm, minBridgeMm: s.minBridgeMm };
   renderCheck();
+}
+
+function statusLine(kind, text) {
+  const p = document.createElement("p");
+  p.className = kind;
+  p.textContent = text;
+  return p;
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function renderCheck() {
   const r = checkResult;
-  const count = r?.islands.length ?? 0;
+  const islands = r?.islands ?? [];
+  const fragile = r?.fragile ?? [];
 
   checkBadge.hidden = !r;
-  checkStatus.className = `check-status ${r ? (r.valid ? "ok" : "bad") : ""}`;
   if (!r) {
-    checkStatus.textContent = "The stencil couldn't be checked.";
+    checkStatus.replaceChildren(statusLine("bad", "The stencil couldn't be checked."));
   } else if (r.valid) {
     checkBadge.className = "badge ok";
-    checkBadge.textContent = "✓ No unsupported pieces";
-    checkStatus.textContent = "✓ Every piece of pumpkin stays attached.";
+    checkBadge.textContent = "✓ Stencil OK";
+    checkStatus.replaceChildren(
+      statusLine("ok", "✓ Every piece stays attached by bridges wide enough to carve."),
+    );
   } else {
-    const pieces = `${count} unsupported piece${count === 1 ? "" : "s"}`;
-    checkBadge.className = "badge bad";
-    checkBadge.textContent = `⚠ ${pieces}`;
-    checkStatus.textContent = `⚠ ${pieces} would fall out.`;
+    const parts = [];
+    if (islands.length) parts.push(`${islands.length} unsupported`);
+    if (fragile.length) parts.push(`${fragile.length} fragile`);
+    checkBadge.className = `badge ${islands.length ? "bad" : "warn"}`;
+    checkBadge.textContent = `⚠ ${parts.join(" · ")}`;
+    const lines = [];
+    if (islands.length) {
+      lines.push(statusLine("bad", `⚠ ${plural(islands.length, "piece")} would fall out.`));
+    }
+    if (fragile.length) {
+      const min = `${toUnit(r.minBridgeMm)} ${state.unit}`;
+      lines.push(
+        statusLine(
+          "warn",
+          `⚠ ${plural(fragile.length, "piece")} ${fragile.length === 1 ? "hangs" : "hang"} ` +
+            `by bridges under ${min}.`,
+        ),
+      );
+    }
+    checkStatus.replaceChildren(...lines);
   }
 
   const show = !!r && !r.valid && state.highlightIslands;
-  highlightField.hidden = !r || r.valid;
+  highlightField.hidden = checkLegend.hidden = !r || r.valid;
   highlightToggle.checked = state.highlightIslands;
   islandOverlay.hidden = !show;
   if (show) islandOverlay.src = r.overlay;
 
+  const pieces = [
+    ...islands.map((piece, i) => ({ piece, kind: "island", id: `island-${i}` })),
+    ...fragile.map((piece, i) => ({ piece, kind: "fragile", id: `fragile-${i}` })),
+  ];
   islandBoxes.replaceChildren(
-    ...(show ? r.islands : []).map((island, i) => {
+    ...(show ? pieces : []).map(({ piece, kind, id }) => {
       const box = document.createElement("div");
-      box.className = "island-box";
-      box.dataset.index = i;
+      box.className = `island-box ${kind}`;
+      box.dataset.id = id;
       Object.assign(box.style, {
-        left: `${(island.x / r.width) * 100}%`,
-        top: `${(island.y / r.height) * 100}%`,
-        width: `${(island.width / r.width) * 100}%`,
-        height: `${(island.height / r.height) * 100}%`,
+        left: `${(piece.x / r.width) * 100}%`,
+        top: `${(piece.y / r.height) * 100}%`,
+        width: `${(piece.width / r.width) * 100}%`,
+        height: `${(piece.height / r.height) * 100}%`,
       });
       return box;
     }),
   );
 
-  const listed = r && !r.valid ? r.islands.slice(0, MAX_LISTED_ISLANDS) : [];
-  islandList.replaceChildren(
-    ...listed.map((island, i) => {
+  pieceLists.replaceChildren(
+    ...(r ? [pieceList("Falls out", islands, "island", r), pieceList("Fragile", fragile, "fragile", r)] : [])
+      .flat(),
+  );
+}
+
+// A titled list of pieces with their printed size; empty if there are none.
+function pieceList(title, pieces, kind, r) {
+  if (!pieces.length) return [];
+  const heading = document.createElement("p");
+  heading.className = "piece-list-title";
+  heading.textContent = title;
+
+  const mmPerPx = r.widthMm / r.width;
+  const list = document.createElement("ol");
+  list.className = "island-list";
+  const listed = pieces.slice(0, MAX_LISTED_PIECES);
+  list.append(
+    ...listed.map((piece, i) => {
       const li = document.createElement("li");
-      li.textContent = `${island.width}×${island.height} px (${island.area.toLocaleString()} px²)`;
+      li.textContent =
+        `${toUnit(piece.width * mmPerPx)} × ${toUnit(piece.height * mmPerPx)} ${state.unit}`;
       // Hovering a list entry picks out its box on the preview.
-      li.addEventListener("mouseenter", () => setActiveBox(i, true));
-      li.addEventListener("mouseleave", () => setActiveBox(i, false));
+      const id = `${kind}-${i}`;
+      li.addEventListener("mouseenter", () => setActiveBox(id, true));
+      li.addEventListener("mouseleave", () => setActiveBox(id, false));
       return li;
     }),
   );
-  if (count > listed.length) {
+  if (pieces.length > listed.length) {
     const more = document.createElement("li");
-    more.textContent = `…and ${count - listed.length} smaller`;
-    islandList.append(more);
+    more.textContent = `…and ${pieces.length - listed.length} smaller`;
+    list.append(more);
   }
+  return [heading, list];
 }
 
-function setActiveBox(index, active) {
-  islandBoxes.querySelector(`[data-index="${index}"]`)?.classList.toggle("active", active);
+function setActiveBox(id, active) {
+  islandBoxes.querySelector(`[data-id="${id}"]`)?.classList.toggle("active", active);
 }
 
 // Slider drags fire many input events; only fetch the image once they settle.
@@ -381,6 +491,8 @@ function currentSettings() {
       invert: false,
       speckle: DEFAULT_SPECKLE,
       smoothness: DEFAULT_SMOOTHNESS,
+      widthMm: state.upload.page_widths_mm?.[state.page - 1] ?? DEFAULT_WIDTH_MM,
+      minBridgeMm: DEFAULT_MIN_BRIDGE_MM,
     });
   }
   return state.settings.get(key);
@@ -442,6 +554,7 @@ function renderEditor() {
   invertToggle.checked = s.invert;
   $("speckle-input").value = $("speckle-output").textContent = s.speckle;
   $("smoothness-input").value = $("smoothness-output").textContent = s.smoothness;
+  renderSizeFields();
 
   const shades = shadeValues(s.shades, s.invert);
   thresholdSliders.replaceChildren(

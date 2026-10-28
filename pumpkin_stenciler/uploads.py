@@ -51,6 +51,9 @@ class Upload:
     width: int  # dimensions of the first page
     height: int
     created_at: float
+    # Physical width of each page, for PDFs; images have no physical size.
+    # Missing from uploads saved before this was recorded.
+    page_widths_mm: list[float] | None = None
 
     def to_json(self) -> dict:
         data = asdict(self)
@@ -70,9 +73,10 @@ def save_upload(filename: str, data: bytes) -> Upload:
 
     # Sniff the content rather than trusting the browser-supplied type.
     if data[:5] == b"%PDF-":
-        kind, pages = "pdf", _render_pdf(data)
+        kind = "pdf"
+        pages, page_widths_mm = _render_pdf(data)
     else:
-        kind, pages = "image", [_load_image(data)]
+        kind, pages, page_widths_mm = "image", [_load_image(data)], None
 
     upload_id = uuid.uuid4().hex
     folder = UPLOAD_DIR / upload_id
@@ -88,6 +92,7 @@ def save_upload(filename: str, data: bytes) -> Upload:
             width=pages[0].width,
             height=pages[0].height,
             created_at=time.time(),
+            page_widths_mm=page_widths_mm,
         )
         (folder / "meta.json").write_text(json.dumps(asdict(upload)))
     except Exception:
@@ -164,7 +169,8 @@ def _has_alpha(image: Image.Image) -> bool:
     )
 
 
-def _render_pdf(data: bytes) -> list[Image.Image]:
+def _render_pdf(data: bytes) -> tuple[list[Image.Image], list[float]]:
+    """The rendered pages and each page's physical width in mm."""
     try:
         pdf = pdfium.PdfDocument(data)
     except pdfium.PdfiumError:
@@ -176,14 +182,17 @@ def _render_pdf(data: bytes) -> list[Image.Image]:
         if len(pdf) > MAX_PDF_PAGES:
             raise UploadError(f"The PDF has more than {MAX_PDF_PAGES} pages.")
 
-        pages = []
+        pages, widths_mm = [], []
         for page in pdf:
             width, height = page.get_size()  # in points (1/72 inch)
             scale = MAX_PAGE_SIDE / max(width, height)
             # White background so transparent PDF regions don't render black.
             bitmap = page.render(scale=scale, fill_color=(255, 255, 255, 255))
-            pages.append(bitmap.to_pil().convert("RGB"))
+            image = bitmap.to_pil().convert("RGB")
+            pages.append(image)
+            # From the rendered size, so rotated pages report the visible width.
+            widths_mm.append(round(image.width / scale / 72 * 25.4, 2))
             page.close()
-        return pages
+        return pages, widths_mm
     finally:
         pdf.close()

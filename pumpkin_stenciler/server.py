@@ -108,21 +108,28 @@ def get_svg(
     return Response(svg, media_type="image/svg+xml", headers=_CACHE_HEADERS)
 
 
-@app.get("/api/uploads/{upload_id}/pages/{page}/islands")
-def get_islands(
+@app.get("/api/uploads/{upload_id}/pages/{page}/check")
+def check_stencil(
     upload_id: str,
     page: int,
     thresholds: str,
     invert: bool = False,
     speckle: int = Query(vectorize.DEFAULT_SPECKLE, ge=0, le=vectorize.MAX_SPECKLE),
+    width_mm: float | None = Query(None, gt=0, le=5000),
+    min_bridge_mm: float | None = Query(None, ge=0, le=500),
 ):
-    """Unsupported pieces in the stencil, i.e. material enclosed by black cuts.
+    """Pieces that won't survive carving: islands enclosed by black cuts, and
+    (when the printed width_mm and min_bridge_mm are given) fragile pieces
+    held on only by bridges narrower than min_bridge_mm.
 
     overlay is a data: URL of a transparent PNG highlighting them, or null.
     """
     parsed = _parse_thresholds(thresholds)
     with _open_page(upload_id, page) as image:
-        report = validate.find_islands(image, parsed, invert, speckle)
+        min_bridge_px = 0.0
+        if width_mm and min_bridge_mm:
+            min_bridge_px = min_bridge_mm * image.width / width_mm
+        report = validate.check_stencil(image, parsed, invert, speckle, min_bridge_px)
     overlay = None
     if report.overlay:
         overlay = "data:image/png;base64," + base64.b64encode(report.overlay).decode()
@@ -131,7 +138,8 @@ def get_islands(
             "valid": report.valid,
             "width": report.width,
             "height": report.height,
-            "islands": [asdict(i) for i in report.islands],
+            "islands": [asdict(p) for p in report.islands],
+            "fragile": [asdict(p) for p in report.fragile],
             "overlay": overlay,
         },
         headers=_CACHE_HEADERS,

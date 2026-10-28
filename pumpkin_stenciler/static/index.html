@@ -115,13 +115,33 @@
           </div>
 
           <h3 class="panel-section">Check stencil</h3>
-          <p class="muted hint">Finds pieces of pumpkin that would fall out because black cut-outs surround them completely.</p>
-          <p id="check-status" class="check-status" aria-live="polite"></p>
+          <p class="muted hint">Finds pieces of pumpkin that would fall out because black cut-outs surround them, or that hang by bridges too thin to survive carving.</p>
+
+          <div class="field size-grid">
+            <label for="stencil-width" class="field-label">Printed width</label>
+            <input id="stencil-width" type="number" min="0.1" step="0.1" inputmode="decimal">
+            <select id="unit-select" aria-label="Units">
+              <option value="in">in</option>
+              <option value="cm">cm</option>
+            </select>
+
+            <label for="min-bridge" class="field-label">Minimum bridge</label>
+            <input id="min-bridge" type="number" min="0" step="0.05" inputmode="decimal">
+            <span id="min-bridge-unit" class="muted"></span>
+          </div>
+          <p class="muted hint">Skin bridges narrower than this will likely snap. ¼ in (6 mm) is a safe minimum; intricate designs cut with a thin saw can go down to about ⅛ in.</p>
+
+          <div id="check-status" class="check-status" aria-live="polite"></div>
           <label id="highlight-field" class="field toggle" hidden>
             <input id="highlight-toggle" type="checkbox" checked>
-            <span class="field-label">Highlight unsupported pieces</span>
+            <span class="field-label">Highlight problems</span>
           </label>
-          <ol id="island-list" class="island-list"></ol>
+          <p id="check-legend" class="check-legend" hidden>
+            <span><i class="swatch-island"></i>Falls out</span>
+            <span><i class="swatch-fragile"></i>Fragile piece</span>
+            <span><i class="swatch-bridge"></i>Thin bridge</span>
+          </p>
+          <div id="piece-lists"></div>
         </div>
       </div>
     </section>

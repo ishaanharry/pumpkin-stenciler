@@ -215,6 +215,7 @@ h1, h2 { margin: 0; line-height: 1.2; }
 }
 .badge.ok { background: rgba(70, 180, 100, .18); color: #7ddc95; }
 .badge.bad { background: rgba(229, 83, 75, .18); color: #ff8a83; }
+.badge.warn { background: rgba(255, 150, 0, .18); color: #ffb050; }
 
 .view-tabs {
   display: inline-flex;
@@ -374,14 +375,66 @@ a.btn { text-decoration: none; }
   outline-offset: 3px;
   border-radius: 2px;
 }
-.island-box.active { outline-width: 4px; outline-color: #ffd23f; }
+.island-box.fragile { outline-color: #ff9600; }
+.island-box.active { outline-width: 4px; outline-color: #fff; }
 
-.check-status { margin: 10px 0 0; font-size: 14px; font-weight: 600; }
-.check-status.ok { color: #7ddc95; }
-.check-status.bad { color: #ff8a83; }
+.size-grid {
+  display: grid;
+  grid-template-columns: 1fr 72px 56px;
+  align-items: center;
+  gap: 8px;
+}
+.size-grid .field-label { margin: 0; }
+.size-grid input,
+.size-grid select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.size-grid input:invalid { border-color: var(--danger); }
+.size-grid span { font-size: 13px; padding-left: 4px; }
 
-.island-list {
+.check-status { margin: 14px 0 0; font-size: 14px; font-weight: 600; }
+.check-status p { margin: 0 0 4px; }
+.check-status .ok { color: #7ddc95; }
+.check-status .bad { color: #ff8a83; }
+.check-status .warn { color: #ffb050; }
+
+.check-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.check-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+.swatch-island { background: #ff3030; }
+.swatch-fragile { background: #ff9600; }
+.swatch-bridge { background: #ffe600; }
+
+.piece-list-title {
+  margin: 12px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.island-list {
+  margin: 4px 0 0;
   padding-left: 22px;
   font-size: 13px;
   color: var(--muted);
