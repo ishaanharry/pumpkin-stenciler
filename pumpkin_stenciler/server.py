@@ -3,12 +3,14 @@ import io
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from pydantic import BaseModel, ConfigDict, Field
 
-from . import segment, uploads, validate, vectorize
+from . import segment, stencil, uploads, validate, vectorize
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -72,18 +74,31 @@ def get_histogram(upload_id: str, page: int):
         return segment.histogram(image)
 
 
-@app.get("/api/uploads/{upload_id}/pages/{page}/segmented")
-def get_segmented(upload_id: str, page: int, thresholds: str, invert: bool = False):
-    """The page reduced to len(thresholds) + 1 shades, e.g. ?thresholds=85,170.
+# The rendered outputs below all start from the same final stencil
+# (stencil.build): segmented, speck-cleaned, with the page's hand edits
+# applied. Their URLs are cached, so clients add a `v` query parameter with
+# the page's edits version; the server ignores it, but it changes the URL
+# whenever the edits do.
 
-    With invert=true the shades are flipped: dark areas become white and vice versa.
+
+@app.get("/api/uploads/{upload_id}/pages/{page}/segmented")
+def get_segmented(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    invert: bool = False,
+    speckle: int = Query(stencil.DEFAULT_SPECKLE, ge=0, le=stencil.MAX_SPECKLE),
+    edits: bool = True,
+):
+    """The stencil as a flat-shaded PNG, e.g. ?thresholds=85,170.
+
+    With invert=true the shades are flipped. edits=false leaves out the hand
+    edits, which the editor draws on top itself.
     """
-    parsed = _parse_thresholds(thresholds)
-    with _open_page(upload_id, page) as image:
-        result = segment.segment(image, parsed, invert)
+    result = _build_stencil(upload_id, page, thresholds, invert, speckle, edits)
     buffer = io.BytesIO()
     # Speed matters more than file size here: this is re-rendered as sliders move.
-    result.save(buffer, format="PNG", compress_level=1)
+    Image.fromarray(result.values).save(buffer, format="PNG", compress_level=1)
     return Response(buffer.getvalue(), media_type="image/png", headers=_CACHE_HEADERS)
 
 
@@ -93,18 +108,17 @@ def get_svg(
     page: int,
     thresholds: str,
     invert: bool = False,
-    speckle: int = Query(vectorize.DEFAULT_SPECKLE, ge=0, le=vectorize.MAX_SPECKLE),
+    speckle: int = Query(stencil.DEFAULT_SPECKLE, ge=0, le=stencil.MAX_SPECKLE),
     smoothness: int = Query(
         vectorize.DEFAULT_SMOOTHNESS, ge=0, le=vectorize.MAX_SMOOTHNESS
     ),
 ):
-    """The segmented page traced to a stacked SVG, one <g> per shade."""
-    parsed = _parse_thresholds(thresholds)
-    with _open_page(upload_id, page) as image:
-        try:
-            svg = vectorize.vectorize(image, parsed, invert, speckle, smoothness)
-        except vectorize.VectorizeError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+    """The stencil traced to a stacked SVG, one <g> per shade."""
+    result = _build_stencil(upload_id, page, thresholds, invert, speckle)
+    try:
+        svg = vectorize.vectorize(result, smoothness)
+    except vectorize.VectorizeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return Response(svg, media_type="image/svg+xml", headers=_CACHE_HEADERS)
 
 
@@ -114,7 +128,7 @@ def check_stencil(
     page: int,
     thresholds: str,
     invert: bool = False,
-    speckle: int = Query(vectorize.DEFAULT_SPECKLE, ge=0, le=vectorize.MAX_SPECKLE),
+    speckle: int = Query(stencil.DEFAULT_SPECKLE, ge=0, le=stencil.MAX_SPECKLE),
     width_mm: float | None = Query(None, gt=0, le=5000),
     min_bridge_mm: float | None = Query(None, ge=0, le=500),
 ):
@@ -124,12 +138,11 @@ def check_stencil(
 
     overlay is a data: URL of a transparent PNG highlighting them, or null.
     """
-    parsed = _parse_thresholds(thresholds)
-    with _open_page(upload_id, page) as image:
-        min_bridge_px = 0.0
-        if width_mm and min_bridge_mm:
-            min_bridge_px = min_bridge_mm * image.width / width_mm
-        report = validate.check_stencil(image, parsed, invert, speckle, min_bridge_px)
+    result = _build_stencil(upload_id, page, thresholds, invert, speckle)
+    min_bridge_px = 0.0
+    if width_mm and min_bridge_mm:
+        min_bridge_px = min_bridge_mm * result.levels.shape[1] / width_mm
+    report = validate.check_stencil(result, min_bridge_px)
     overlay = None
     if report.overlay:
         overlay = "data:image/png;base64," + base64.b64encode(report.overlay).decode()
@@ -146,8 +159,23 @@ def check_stencil(
     )
 
 
-# Pages never change once uploaded, so a given URL always yields the same result.
+# Pages never change once uploaded, and edits are versioned in the URL (see
+# above), so a given URL always yields the same result.
 _CACHE_HEADERS = {"Cache-Control": "private, max-age=3600"}
+
+
+def _build_stencil(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    invert: bool,
+    speckle: int,
+    with_edits: bool = True,
+) -> stencil.Stencil:
+    parsed = _parse_thresholds(thresholds)
+    edits = uploads.load_edits(upload_id, page) if with_edits else None
+    with _open_page(upload_id, page) as image:
+        return stencil.build(image, parsed, invert, speckle, edits)
 
 
 def _parse_thresholds(raw: str) -> list[int]:
@@ -162,6 +190,67 @@ def _open_page(upload_id: str, page: int) -> Image.Image:
     if path is None:
         raise HTTPException(status_code=404, detail="Page not found.")
     return Image.open(path)
+
+
+# ---- Hand edits and saved settings ----------------------------------------
+
+
+@app.get("/api/uploads/{upload_id}/pages/{page}/edits")
+def get_edits(upload_id: str, page: int):
+    """The page's hand edits as an RGBA PNG (see stencil.py), or 404 if none."""
+    if uploads.edits_version(upload_id, page) is None:
+        raise HTTPException(status_code=404, detail="No edits.")
+    return FileResponse(uploads.edits_path(upload_id, page), media_type="image/png")
+
+
+@app.put("/api/uploads/{upload_id}/pages/{page}/edits")
+async def put_edits(upload_id: str, page: int, request: Request):
+    """Replace the page's edits with the PNG in the request body.
+
+    Returns the new edits version (null if the PNG had no edited pixels).
+    """
+    if uploads.page_path(upload_id, page) is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+    data = await request.body()
+    if len(data) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Edits are too large.")
+    try:
+        version = await run_in_threadpool(uploads.save_edits, upload_id, page, data)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"version": version}
+
+
+@app.delete("/api/uploads/{upload_id}/pages/{page}/edits", status_code=204)
+def delete_edits(upload_id: str, page: int):
+    if uploads.page_path(upload_id, page) is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+    uploads.delete_edits(upload_id, page)
+
+
+class PageSettings(BaseModel):
+    """Stencil settings for one page, as the editor uses them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    shades: int = Field(ge=segment.MIN_SHADES, le=segment.MAX_SHADES)
+    thresholds: list[int]
+    invert: bool
+    speckle: int = Field(ge=0, le=stencil.MAX_SPECKLE)
+    smoothness: int = Field(ge=0, le=vectorize.MAX_SMOOTHNESS)
+    widthMm: float = Field(gt=0, le=5000)
+    minBridgeMm: float = Field(ge=0, le=500)
+
+
+@app.put("/api/uploads/{upload_id}/pages/{page}/settings", status_code=204)
+def put_settings(upload_id: str, page: int, settings: PageSettings):
+    parsed = _parse_thresholds(",".join(map(str, settings.thresholds)))
+    if len(parsed) != settings.shades - 1:
+        raise HTTPException(status_code=400, detail="Wrong number of thresholds.")
+    try:
+        uploads.save_settings(upload_id, page, settings.model_dump())
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.delete("/api/uploads/{upload_id}", status_code=204)

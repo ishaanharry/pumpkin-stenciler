@@ -1,3 +1,5 @@
+import { StencilEditor } from "./editor.js";
+
 const $ = (id) => document.getElementById(id);
 
 const dropzone = $("dropzone");
@@ -24,7 +26,7 @@ const downloadSvgBtn = $("download-svg-btn");
 // Mirrors MIN_SHADES / MAX_SHADES in segment.py.
 const MIN_SHADES = 2;
 const MAX_SHADES = 5;
-// Mirrors DEFAULT_SPECKLE / DEFAULT_SMOOTHNESS in vectorize.py.
+// Mirror DEFAULT_SPECKLE in stencil.py and DEFAULT_SMOOTHNESS in vectorize.py.
 const DEFAULT_SPECKLE = 8;
 const DEFAULT_SMOOTHNESS = 25;
 
@@ -33,11 +35,12 @@ const state = {
   uploads: [],
   upload: null,
   page: 1,
-  view: "segmented", // "original" | "segmented" | "svg"
-  // Segmentation settings per page, keyed by `${uploadId}:${page}`.
+  view: "segmented", // "original" | "segmented" (the editable stencil) | "svg"
+  // Stencil settings per page, keyed by `${uploadId}:${page}`; saved on the server.
   settings: new Map(),
   histograms: new Map(),
   highlightIslands: true,
+  zoom: null, // null = fit to view, else image pixels → CSS pixels
 };
 
 // ---- Uploading ----------------------------------------------------------
@@ -140,6 +143,7 @@ function describe(u) {
 // ---- Viewer -------------------------------------------------------------
 
 function select(id, page = 1) {
+  saveEdits(); // starts saving the current page's edits before they're replaced
   const upload = state.uploads.find((u) => u.id === id);
   state.upload = upload ?? null;
   state.page = page;
@@ -148,6 +152,7 @@ function select(id, page = 1) {
 }
 
 function selectPage(page) {
+  saveEdits();
   state.page = page;
   renderViewer();
 }
@@ -181,6 +186,10 @@ function renderViewer() {
     }),
   );
 
+  if (editorPage !== settingsKey()) {
+    state.zoom = null;
+    openPageInEditor();
+  }
   renderEditor();
   renderPreview();
   loadHistogram();
@@ -205,31 +214,46 @@ function pageUrl() {
   return state.upload.pages[state.page - 1];
 }
 
-function segmentationQuery() {
+// Everything that shapes the automatic stencil (but not the hand edits).
+function stencilQuery() {
   const s = currentSettings();
   const invert = s.invert ? "&invert=true" : "";
-  return `thresholds=${s.thresholds.join(",")}${invert}`;
+  return `thresholds=${s.thresholds.join(",")}${invert}&speckle=${s.speckle}`;
+}
+
+// Outputs that include hand edits are cached by URL, so their URLs carry the
+// page's edits version and change whenever the edits do.
+function editsQuery() {
+  const version = state.upload.edit_versions?.[state.page - 1];
+  return version ? `&v=${version}` : "";
+}
+
+// The automatic stencil without edits: the editor paints over it.
+function stencilBaseUrl() {
+  return `${pageUrl()}/segmented?${stencilQuery()}&edits=false`;
 }
 
 function segmentedUrl() {
-  return `${pageUrl()}/segmented?${segmentationQuery()}`;
+  return `${pageUrl()}/segmented?${stencilQuery()}${editsQuery()}`;
 }
 
 function svgUrl() {
   const s = currentSettings();
-  return `${pageUrl()}/svg?${segmentationQuery()}&speckle=${s.speckle}&smoothness=${s.smoothness}`;
+  return `${pageUrl()}/svg?${stencilQuery()}&smoothness=${s.smoothness}${editsQuery()}`;
 }
 
 function renderPreview() {
   tabOriginal.setAttribute("aria-selected", String(state.view === "original"));
   tabSegmented.setAttribute("aria-selected", String(state.view === "segmented"));
   tabSvg.setAttribute("aria-selected", String(state.view === "svg"));
-  const src = { original: pageUrl, segmented: segmentedUrl, svg: svgUrl }[state.view]();
+  const src = { original: pageUrl, segmented: stencilBaseUrl, svg: svgUrl }[state.view]();
   // Compare against the attribute: `.src` is normalised to an absolute URL.
   if (previewImg.getAttribute("src") !== src) {
     preview.classList.add("loading");
     previewImg.src = src;
   }
+  editor.setBaseUrl(stencilBaseUrl());
+  renderEditMode();
   runCheck();
 }
 
@@ -239,6 +263,7 @@ previewImg.addEventListener("load", () => {
   preview.classList.remove("loading");
   previewStack.hidden = false;
   previewError.hidden = true;
+  applyZoom();
 });
 
 // An <img> can't read the error body, so fetch it to show the server's reason.
@@ -312,6 +337,7 @@ for (const [input, key, min] of [
     const value = Number(input.value);
     if (input.value === "" || !(value >= min)) return; // leave the last valid value
     currentSettings()[key] = value * MM_PER_UNIT[state.unit];
+    settingsChanged();
     scheduleCheck();
   });
   // Tidy up rejected or unrounded entries once the field is left.
@@ -333,7 +359,7 @@ function scheduleCheck() {
 async function runCheck() {
   const s = currentSettings();
   const url =
-    `${pageUrl()}/check?${segmentationQuery()}&speckle=${s.speckle}` +
+    `${pageUrl()}/check?${stencilQuery()}${editsQuery()}` +
     `&width_mm=${s.widthMm.toFixed(2)}&min_bridge_mm=${s.minBridgeMm.toFixed(2)}`;
   if (url === checkUrl) return;
   checkUrl = url;
@@ -399,6 +425,7 @@ function renderCheck() {
   highlightToggle.checked = state.highlightIslands;
   islandOverlay.hidden = !show;
   if (show) islandOverlay.src = r.overlay;
+  editor.setProblemsUrl(r?.overlay ?? null);
 
   const pieces = [
     ...islands.map((piece, i) => ({ piece, kind: "island", id: `island-${i}` })),
@@ -482,8 +509,12 @@ function gray(v) {
   return `rgb(${v}, ${v}, ${v})`;
 }
 
+function settingsKey() {
+  return state.upload ? `${state.upload.id}:${state.page}` : null;
+}
+
 function currentSettings() {
-  const key = `${state.upload.id}:${state.page}`;
+  const key = settingsKey();
   if (!state.settings.has(key)) {
     state.settings.set(key, {
       shades: MIN_SHADES,
@@ -493,15 +524,42 @@ function currentSettings() {
       smoothness: DEFAULT_SMOOTHNESS,
       widthMm: state.upload.page_widths_mm?.[state.page - 1] ?? DEFAULT_WIDTH_MM,
       minBridgeMm: DEFAULT_MIN_BRIDGE_MM,
+      // Saved settings win; the server validated them when they were saved.
+      ...state.upload.settings?.[state.page - 1],
     });
   }
   return state.settings.get(key);
+}
+
+// Settings are saved shortly after they stop changing, per page.
+const unsavedSettings = new Set();
+let settingsTimer = null;
+
+function settingsChanged() {
+  unsavedSettings.add(settingsKey());
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(saveSettings, 600);
+}
+
+function saveSettings() {
+  clearTimeout(settingsTimer);
+  for (const key of unsavedSettings) {
+    const [id, page] = key.split(":");
+    fetch(`/api/uploads/${id}/pages/${page}/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state.settings.get(key)),
+      keepalive: true, // lets a save started while leaving the page finish
+    }).catch(() => {});
+  }
+  unsavedSettings.clear();
 }
 
 function setShades(shades) {
   const s = currentSettings();
   s.shades = shades;
   s.thresholds = defaultThresholds(shades);
+  settingsChanged();
   showProcessed();
   renderEditor();
   renderPreview();
@@ -511,19 +569,22 @@ $("reset-btn").addEventListener("click", () => setShades(currentSettings().shade
 
 invertToggle.addEventListener("change", () => {
   currentSettings().invert = invertToggle.checked;
+  settingsChanged();
   showProcessed();
   renderEditor();
   renderPreview();
 });
 
-for (const [name, input, output] of [
-  ["speckle", $("speckle-input"), $("speckle-output")],
-  ["smoothness", $("smoothness-input"), $("smoothness-output")],
+// Speck removal shapes the stencil itself; smoothness only affects the SVG.
+for (const [name, input, output, showView] of [
+  ["speckle", $("speckle-input"), $("speckle-output"), showProcessed],
+  ["smoothness", $("smoothness-input"), $("smoothness-output"), () => (state.view = "svg")],
 ]) {
   input.addEventListener("input", () => {
     currentSettings()[name] = Number(input.value);
     output.textContent = input.value;
-    state.view = "svg";
+    settingsChanged();
+    showView();
     updateDownload();
     schedulePreview();
   });
@@ -585,6 +646,7 @@ function renderEditor() {
         input.value = v;
         output.textContent = v;
         s.thresholds[i] = v;
+        settingsChanged();
         showProcessed();
         drawHistogram();
         updateDownload();
@@ -598,13 +660,14 @@ function renderEditor() {
 
   drawHistogram();
   updateDownload();
+  renderPaintSwatches();
 }
 
 function updateDownload() {
   const base = state.upload.filename.replace(/\.[^.]+$/, "");
   const suffix = state.upload.page_count > 1 ? `-p${state.page}` : "";
   downloadBtn.href = segmentedUrl();
-  downloadBtn.download = `${base}${suffix}-segmented.png`;
+  downloadBtn.download = `${base}${suffix}-stencil.png`;
   downloadSvgBtn.href = svgUrl();
   downloadSvgBtn.download = `${base}${suffix}-stencil.svg`;
 }
@@ -652,9 +715,325 @@ function drawHistogram() {
   for (const t of s.thresholds) ctx.fillRect(x(t) - 1, 0, 2, height);
 }
 
+// ---- Hand editing -------------------------------------------------------
+
+const editCanvas = $("edit-canvas");
+const editToolbar = $("edit-toolbar");
+const paintSwatches = $("paint-swatches");
+const brushSize = $("brush-size");
+const brushCursor = $("brush-cursor");
+const undoBtn = $("undo-btn");
+const redoBtn = $("redo-btn");
+const clearEditsBtn = $("clear-edits-btn");
+const editStatus = $("edit-status");
+
+const editor = new StencilEditor({ canvas: editCanvas, cursor: brushCursor, onEdit: editsChanged });
+
+let editorPage = null; // settingsKey() of the page loaded into the editor
+let editsReady = false; // false until the page's saved edits have loaded
+let editsUnsaved = false;
+let pendingSaves = 0;
+let saveTimer = null;
+let saveQueue = Promise.resolve();
+
+async function openPageInEditor() {
+  const key = settingsKey();
+  editorPage = key;
+  editsReady = false;
+  editsUnsaved = false;
+  const [width, height] = state.upload.page_sizes[state.page - 1];
+  editor.reset(width, height);
+  setEditStatus("");
+
+  const version = state.upload.edit_versions?.[state.page - 1];
+  if (version) {
+    try {
+      const res = await fetch(`${pageUrl()}/edits?v=${version}`);
+      if (!res.ok) throw new Error();
+      const bitmap = await createImageBitmap(await res.blob(), {
+        premultiplyAlpha: "none",
+        colorSpaceConversion: "none",
+      });
+      if (editorPage !== key) return; // switched pages meanwhile
+      editor.loadEdits(bitmap);
+    } catch {
+      // Stay read-only: saving now would overwrite the edits we couldn't load.
+      if (editorPage === key) setEditStatus("Couldn't load this page's edits. Reload to try again.");
+      return;
+    }
+  }
+  if (editorPage !== key) return;
+  editsReady = true;
+  renderEditMode();
+}
+
+// Paintable shades, darkest first whatever the flip setting: black is cut.
+function paintShades() {
+  return shadeValues(currentSettings().shades);
+}
+
+function shadeName(value) {
+  if (value === 0) return "Cut (black)";
+  if (value === 255) return "Skin (white)";
+  return `Shave (gray ${value})`;
+}
+
+function renderPaintSwatches() {
+  const shades = paintShades();
+  editor.setShades(shades);
+  paintSwatches.replaceChildren(
+    ...shades.map((value) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.role = "radio";
+      btn.style.background = gray(value);
+      btn.title = shadeName(value);
+      btn.setAttribute("aria-label", shadeName(value));
+      btn.setAttribute("aria-checked", String(editor.color === value));
+      btn.addEventListener("click", () => {
+        editor.color = value;
+        if (editor.tool !== "fill") editor.setTool("brush");
+        renderPaintSwatches();
+        renderEditMode();
+      });
+      return btn;
+    }),
+  );
+}
+
+function renderEditMode() {
+  const editing = state.view === "segmented";
+  editToolbar.hidden = !editing;
+  editCanvas.hidden = !editing;
+  editor.setEnabled(editing && editsReady && !spaceHeld);
+  for (const btn of editToolbar.querySelectorAll("[data-tool]")) {
+    btn.setAttribute("aria-checked", String(btn.dataset.tool === editor.tool));
+  }
+  $("brush-size-field").hidden = editor.tool === "fill";
+  brushSize.value = editor.size;
+  $("brush-size-output").textContent = `${editor.size} px`;
+  undoBtn.disabled = !editor.canUndo;
+  redoBtn.disabled = !editor.canRedo;
+  clearEditsBtn.disabled = !editsReady || !editor.hasEdits();
+}
+
+function setTool(tool) {
+  editor.setTool(tool);
+  renderEditMode();
+}
+
+function setBrushSize(size) {
+  editor.size = Math.min(200, Math.max(1, Math.round(size)));
+  renderEditMode();
+}
+
+for (const btn of editToolbar.querySelectorAll("[data-tool]")) {
+  btn.addEventListener("click", () => setTool(btn.dataset.tool));
+}
+brushSize.addEventListener("input", () => setBrushSize(Number(brushSize.value)));
+undoBtn.addEventListener("click", () => editor.undo());
+redoBtn.addEventListener("click", () => editor.redo());
+clearEditsBtn.addEventListener("click", () => {
+  if (confirm("Remove all hand edits on this page? You can undo this.")) editor.clear();
+});
+
+function setEditStatus(text) {
+  editStatus.textContent = text;
+}
+
+function editsChanged() {
+  editsUnsaved = true;
+  setEditStatus("Saving…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveEdits, 400);
+  renderEditMode();
+}
+
+// Saves are queued so they reach the server in order. The editor's pixels are
+// captured immediately, so it's safe to switch pages right after calling this.
+function saveEdits() {
+  clearTimeout(saveTimer);
+  if (!editsUnsaved || editorPage !== settingsKey()) return saveQueue;
+  editsUnsaved = false;
+  const upload = state.upload;
+  const page = state.page;
+  const url = `${upload.pages[page - 1]}/edits`;
+  const blob = editor.toBlob();
+  const isCurrent = () => state.upload?.id === upload.id && state.page === page;
+
+  pendingSaves++;
+  saveQueue = saveQueue
+    .then(async () => {
+      const data = await blob;
+      const res = data
+        ? await fetch(url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: data })
+        : await fetch(url, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Saving edits failed (${res.status}).`);
+      const version = data ? (await res.json()).version : null;
+      // The list may have been refreshed since, so update both copies.
+      for (const u of new Set([upload, state.uploads.find((x) => x.id === upload.id)])) {
+        if (u) u.edit_versions[page - 1] = version;
+      }
+      if (isCurrent()) {
+        if (!editsUnsaved) setEditStatus("All edits saved");
+        updateDownload();
+        renderPreview(); // the SVG and the check now include the edits
+      }
+    })
+    .catch(() => {
+      if (!isCurrent()) return;
+      editsUnsaved = true;
+      setEditStatus("Couldn't save edits. They'll be retried with your next change.");
+    })
+    .finally(() => pendingSaves--);
+  return saveQueue;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  saveSettings();
+  if (editsUnsaved || pendingSaves) {
+    saveEdits();
+    e.preventDefault(); // asks the browser to confirm leaving
+  }
+});
+
+// ---- Zoom and pan -------------------------------------------------------
+
+const zoomFitBtn = $("zoom-fit");
+let spaceHeld = false;
+let pan = null;
+
+function currentZoom() {
+  return state.zoom ?? previewImg.clientWidth / (previewImg.naturalWidth || 1);
+}
+
+function applyZoom() {
+  const zoomed = state.zoom !== null && previewImg.naturalWidth > 0;
+  preview.classList.toggle("zoomed", zoomed);
+  previewImg.style.width = zoomed ? `${previewImg.naturalWidth * state.zoom}px` : "";
+  zoomFitBtn.textContent = state.zoom === null ? "Fit" : `${Math.round(state.zoom * 100)}%`;
+}
+
+// Zoom keeping the image point under `anchor` (default: the view's centre) still.
+function setZoom(zoom, anchor = null) {
+  const view = preview.getBoundingClientRect();
+  const point = anchor ?? { x: view.left + view.width / 2, y: view.top + view.height / 2 };
+  const before = previewStack.getBoundingClientRect();
+  state.zoom = zoom === null ? null : Math.min(8, Math.max(0.05, zoom));
+  applyZoom();
+  if (!before.width) return;
+  const after = previewStack.getBoundingClientRect();
+  preview.scrollLeft += after.left + ((point.x - before.left) / before.width) * after.width - point.x;
+  preview.scrollTop += after.top + ((point.y - before.top) / before.height) * after.height - point.y;
+}
+
+$("zoom-in").addEventListener("click", () => setZoom(currentZoom() * 1.25));
+$("zoom-out").addEventListener("click", () => setZoom(currentZoom() / 1.25));
+zoomFitBtn.addEventListener("click", () => setZoom(null));
+
+// Ctrl/⌘ + scroll, and trackpad pinch (which browsers report the same way).
+preview.addEventListener(
+  "wheel",
+  (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    setZoom(currentZoom() * Math.exp(-e.deltaY * 0.002), { x: e.clientX, y: e.clientY });
+  },
+  { passive: false },
+);
+
+// Drag with the middle button, or with Space held, to pan. Runs in the capture
+// phase so a pan never also starts a brush stroke.
+preview.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!(e.button === 1 || (e.button === 0 && spaceHeld))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pan = { x: e.clientX, y: e.clientY, left: preview.scrollLeft, top: preview.scrollTop };
+    preview.setPointerCapture(e.pointerId);
+    preview.classList.add("panning");
+  },
+  true,
+);
+preview.addEventListener("pointermove", (e) => {
+  if (!pan) return;
+  preview.scrollLeft = pan.left - (e.clientX - pan.x);
+  preview.scrollTop = pan.top - (e.clientY - pan.y);
+});
+for (const type of ["pointerup", "pointercancel"]) {
+  preview.addEventListener(type, () => {
+    pan = null;
+    preview.classList.toggle("panning", spaceHeld);
+  });
+}
+
+// ---- Keyboard shortcuts -------------------------------------------------
+
+function isTyping(target) {
+  return !!target.closest?.("input:not([type=range]):not([type=checkbox]), select, textarea");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (!state.upload || isTyping(e.target)) return;
+  const editing = state.view === "segmented";
+  const key = e.key.toLowerCase();
+
+  if (e.code === "Space") {
+    e.preventDefault(); // don't scroll the page
+    if (!spaceHeld) {
+      spaceHeld = true;
+      brushCursor.hidden = true;
+      preview.classList.add("panning");
+      renderEditMode();
+    }
+    return;
+  }
+  if (e.metaKey || e.ctrlKey) {
+    if (editing && (key === "z" || key === "y")) {
+      e.preventDefault();
+      if (key === "y" || e.shiftKey) editor.redo();
+      else editor.undo();
+    }
+    return;
+  }
+  if (e.altKey) return;
+
+  const actions = {
+    "+": () => setZoom(currentZoom() * 1.25),
+    "=": () => setZoom(currentZoom() * 1.25),
+    "-": () => setZoom(currentZoom() / 1.25),
+    0: () => setZoom(null),
+  };
+  if (editing) {
+    Object.assign(actions, {
+      b: () => setTool("brush"),
+      e: () => setTool("eraser"),
+      r: () => setTool("restore"),
+      f: () => setTool("fill"),
+      "[": () => setBrushSize(Math.min(editor.size - 1, editor.size / 1.25)),
+      "]": () => setBrushSize(Math.max(editor.size + 1, editor.size * 1.25)),
+    });
+  }
+  if (!actions[key]) return;
+  e.preventDefault();
+  actions[key]();
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space" || !spaceHeld) return;
+  spaceHeld = false;
+  if (!pan) preview.classList.remove("panning");
+  renderEditMode();
+});
+
 $("delete-btn").addEventListener("click", async () => {
   const u = state.upload;
   if (!u || !confirm(`Delete "${u.filename}"?`)) return;
+  // Its edits are going too, so don't try to save them.
+  clearTimeout(saveTimer);
+  editsUnsaved = false;
+  editorPage = null;
   await fetch(`/api/uploads/${u.id}`, { method: "DELETE" });
   state.upload = null;
   await refreshList();

@@ -20,8 +20,8 @@ it. Two kinds of problem are reported:
   hangs by thin bridges only. Thin dead ends (spikes, tips) also vanish under
   erosion, but losing one doesn't drop a piece, so they aren't reported.
 
-The check runs on the same speck-cleaned layers the SVG is traced from, so
-it judges exactly what gets printed.
+The check runs on the same final stencil (speck-cleaned, with hand edits)
+that the SVG is traced from, so it judges exactly what gets printed.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from . import segment, vectorize
+from .stencil import Stencil
 
 # Overlay colors, chosen to read over black, white and gray alike.
 _ISLAND_COLOR = (255, 48, 48, 200)  # red
@@ -65,19 +65,10 @@ class Report:
         return not self.islands and not self.fragile
 
 
-def check_stencil(
-    image: Image.Image,
-    thresholds: list[int],
-    invert: bool = False,
-    speckle: int = vectorize.DEFAULT_SPECKLE,
-    min_bridge_px: float = 0,
-) -> Report:
+def check_stencil(stencil: Stencil, min_bridge_px: float = 0) -> Report:
     """min_bridge_px: narrowest safe bridge, in image pixels; 0 skips that check."""
-    gray = np.asarray(segment.brightness(image))
-    height, width = gray.shape
-    levels = vectorize.shade_levels(gray, thresholds, speckle)
-    shades = np.array(segment.shade_values(len(thresholds) + 1, invert))
-    material = shades[levels] != 0
+    height, width = stencil.levels.shape
+    material = stencil.values != 0
 
     islands = _find_islands(material)
     fragile = np.zeros_like(islands)

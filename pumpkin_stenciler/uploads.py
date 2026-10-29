@@ -8,6 +8,8 @@ Layout on disk:
     data/uploads/<id>/meta.json
     data/uploads/<id>/page-1.png
     data/uploads/<id>/page-2.png ...
+    data/uploads/<id>/edits-1.png       hand edits to page 1, if any
+    data/uploads/<id>/settings-1.json   stencil settings for page 1, if saved
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -57,9 +60,12 @@ class Upload:
 
     def to_json(self) -> dict:
         data = asdict(self)
-        data["pages"] = [
-            f"/api/uploads/{self.id}/pages/{n}" for n in range(1, self.page_count + 1)
-        ]
+        numbers = range(1, self.page_count + 1)
+        data["pages"] = [f"/api/uploads/{self.id}/pages/{n}" for n in numbers]
+        # Per page, in the same order as "pages".
+        data["page_sizes"] = [page_size(self.id, n) for n in numbers]
+        data["edit_versions"] = [edits_version(self.id, n) for n in numbers]
+        data["settings"] = [load_settings(self.id, n) for n in numbers]
         return data
 
 
@@ -129,6 +135,111 @@ def page_path(upload_id: str, page: int) -> Path | None:
         return None
     path = folder / f"page-{page}.png"
     return path if path.is_file() else None
+
+
+def page_size(upload_id: str, page: int) -> tuple[int, int] | None:
+    path = page_path(upload_id, page)
+    if path is None:
+        return None
+    with Image.open(path) as image:  # reads only the header
+        return image.size
+
+
+# ---- Hand edits ----------------------------------------------------------
+# An RGBA PNG the size of the page: alpha marks edited pixels and the gray
+# value is the output shade painted there (see stencil.py).
+
+
+def edits_path(upload_id: str, page: int) -> Path | None:
+    """Where the page's edits are stored (whether or not there are any)."""
+    return _page_file(upload_id, page, "edits-{}.png")
+
+
+def load_edits(upload_id: str, page: int) -> Image.Image | None:
+    path = edits_path(upload_id, page)
+    if path is None or not path.is_file():
+        return None
+    with Image.open(path) as image:
+        return image.convert("RGBA")
+
+
+def save_edits(upload_id: str, page: int, data: bytes) -> str | None:
+    """Store edits from PNG bytes; returns the new version, or None if empty."""
+    path = edits_path(upload_id, page)
+    size = page_size(upload_id, page)
+    if path is None or size is None:
+        raise UploadError("Page not found.")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "PNG":
+                raise UploadError("Edits must be a PNG.")
+            if image.size != size:
+                raise UploadError("Edits must be the same size as the page.")
+            image = image.convert("RGBA")
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        raise UploadError("Edits must be a PNG.")
+
+    # Normalise: alpha is all or nothing, and unedited pixels carry no color.
+    rgba = np.array(image)
+    edited = rgba[..., 3] >= 128
+    if not edited.any():
+        delete_edits(upload_id, page)
+        return None
+    rgba[..., 3] = np.where(edited, 255, 0)
+    rgba[~edited] = 0
+    _write_atomic(path, lambda f: Image.fromarray(rgba, "RGBA").save(f, format="PNG"))
+    return edits_version(upload_id, page)
+
+
+def delete_edits(upload_id: str, page: int) -> None:
+    path = edits_path(upload_id, page)
+    if path is not None:
+        path.unlink(missing_ok=True)
+
+
+def edits_version(upload_id: str, page: int) -> str | None:
+    """Changes whenever the edits do; used to tell clients to refetch."""
+    path = edits_path(upload_id, page)
+    if path is None or not path.is_file():
+        return None
+    return str(path.stat().st_mtime_ns)
+
+
+# ---- Stencil settings -----------------------------------------------------
+# Opaque to this module: the server validates them, the client interprets them.
+
+
+def load_settings(upload_id: str, page: int) -> dict | None:
+    path = _page_file(upload_id, page, "settings-{}.json")
+    try:
+        return json.loads(path.read_text()) if path else None
+    except (OSError, ValueError):
+        return None
+
+
+def save_settings(upload_id: str, page: int, settings: dict) -> None:
+    path = _page_file(upload_id, page, "settings-{}.json")
+    if path is None or page_path(upload_id, page) is None:
+        raise UploadError("Page not found.")
+    _write_atomic(path, lambda f: f.write(json.dumps(settings).encode()))
+
+
+def _page_file(upload_id: str, page: int, pattern: str) -> Path | None:
+    folder = _folder(upload_id)
+    if folder is None or page < 1:
+        return None
+    return folder / pattern.format(page)
+
+
+def _write_atomic(path: Path, write) -> None:
+    """Write via a temporary file so readers never see a half-written file."""
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(temp, "wb") as f:
+            write(f)
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def delete_upload(upload_id: str) -> bool:

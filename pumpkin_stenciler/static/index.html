@@ -45,16 +45,45 @@
           <div class="preview-toolbar">
             <div class="view-tabs" role="tablist" aria-label="Preview">
               <button id="tab-original" type="button" role="tab">Original</button>
-              <button id="tab-segmented" type="button" role="tab">Segmented</button>
+              <button id="tab-segmented" type="button" role="tab" title="The final stencil. Paint on it to edit.">Stencil</button>
               <button id="tab-svg" type="button" role="tab">SVG</button>
             </div>
             <span id="check-badge" class="badge" hidden></span>
+            <div class="zoom-controls" aria-label="Zoom">
+              <button id="zoom-out" type="button" class="icon-btn" title="Zoom out (−)" aria-label="Zoom out">−</button>
+              <button id="zoom-fit" type="button" class="icon-btn zoom-label" title="Fit to view (0)">Fit</button>
+              <button id="zoom-in" type="button" class="icon-btn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+            </div>
           </div>
+
+          <div id="edit-toolbar" class="edit-toolbar" hidden>
+            <div class="segmented-control tools" role="radiogroup" aria-label="Tool">
+              <button type="button" role="radio" data-tool="brush" title="Brush (B)">Brush</button>
+              <button type="button" role="radio" data-tool="eraser" title="Eraser (E): erase to uncarved skin (white)">Eraser</button>
+              <button type="button" role="radio" data-tool="restore" title="Restore (R): remove your edits under the brush, back to the automatic stencil">Restore</button>
+              <button type="button" role="radio" data-tool="fill" title="Fill (F): click a highlighted piece to fill exactly that piece">Fill</button>
+            </div>
+            <div id="paint-swatches" class="paint-swatches" role="radiogroup" aria-label="Paint shade"></div>
+            <label id="brush-size-field" class="brush-size" title="Brush size ([ and ])">
+              <span>Size</span>
+              <input id="brush-size" type="range" min="1" max="200">
+              <output id="brush-size-output"></output>
+            </label>
+            <div class="edit-actions-inline">
+              <button id="undo-btn" type="button" class="icon-btn" title="Undo (⌘Z)" aria-label="Undo">↶</button>
+              <button id="redo-btn" type="button" class="icon-btn" title="Redo (⇧⌘Z)" aria-label="Redo">↷</button>
+              <button id="clear-edits-btn" type="button" class="btn btn-small">Clear edits</button>
+            </div>
+            <span id="edit-status" class="edit-status muted" aria-live="polite"></span>
+          </div>
+
           <div class="preview">
             <div id="preview-stack" class="preview-stack">
               <img id="preview-img" alt="Selected page">
+              <canvas id="edit-canvas" class="edit-canvas" hidden></canvas>
               <img id="island-overlay" class="island-overlay" alt="" hidden>
               <div id="island-boxes" class="island-boxes"></div>
+              <div id="brush-cursor" class="brush-cursor" hidden></div>
             </div>
             <p id="preview-error" class="preview-error" role="alert" hidden></p>
           </div>

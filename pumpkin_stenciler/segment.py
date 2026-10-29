@@ -54,13 +54,5 @@ def brightness(image: Image.Image) -> Image.Image:
     return image.convert("L")
 
 
-def segment(
-    image: Image.Image, thresholds: list[int], invert: bool = False
-) -> Image.Image:
-    shades = shade_values(len(thresholds) + 1, invert)
-    lut = [shades[sum(value >= t for t in thresholds)] for value in range(256)]
-    return brightness(image).point(lut)
-
-
 def histogram(image: Image.Image) -> list[int]:
     return brightness(image).histogram()

@@ -207,6 +207,64 @@ h1, h2 { margin: 0; line-height: 1.2; }
   margin-bottom: 10px;
 }
 
+.zoom-controls {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.icon-btn {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) { border-color: var(--accent); }
+.icon-btn:disabled { opacity: .4; cursor: default; }
+.zoom-label { min-width: 56px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.btn-small { padding: 4px 10px; font-size: 13px; }
+
+.edit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.edit-toolbar .tools button { padding: 5px 12px; font-size: 13px; }
+.paint-swatches { display: flex; gap: 4px; }
+.paint-swatches button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.paint-swatches button[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 4px var(--accent);
+}
+.brush-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.brush-size input { width: 110px; accent-color: var(--accent); }
+.brush-size output { min-width: 42px; font-variant-numeric: tabular-nums; }
+.edit-actions-inline { display: flex; gap: 4px; align-items: center; }
+.edit-status { font-size: 12px; margin-left: auto; }
+
 .badge {
   padding: 4px 10px;
   border-radius: 999px;
@@ -241,13 +299,18 @@ h1, h2 { margin: 0; line-height: 1.2; }
   font-weight: 600;
 }
 
+/* Scrolls when zoomed in; the stack's auto margins centre it otherwise (and,
+   unlike centring the container, keep every edge reachable by scrolling). */
 .preview {
-  display: grid;
-  place-items: center;
+  display: flex;
+  overflow: auto;
+  max-height: calc(70vh + 32px);
   padding: 16px;
   border-radius: 8px;
   background: var(--bg);
 }
+.preview.panning { cursor: grabbing; }
+.preview.panning .edit-canvas { pointer-events: none; }
 
 /* Edit panel */
 .edit-panel {
@@ -352,7 +415,9 @@ a.btn { text-decoration: none; }
 /* The overlay and boxes sit exactly on top of the preview image. */
 .preview-stack {
   position: relative;
+  flex: none;
   max-width: 100%;
+  margin: auto;
 }
 .preview-stack > #preview-img {
   display: block;
@@ -360,6 +425,29 @@ a.btn { text-decoration: none; }
   max-height: 70vh;
   border-radius: 4px;
 }
+/* Zoomed: the image takes its width from JS and may overflow to scroll. */
+.preview.zoomed .preview-stack { max-width: none; }
+.preview.zoomed .preview-stack > #preview-img { max-width: none; max-height: none; }
+.preview.zoomed img,
+.edit-canvas { image-rendering: pixelated; }
+
+.edit-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.edit-canvas.editing { pointer-events: auto; cursor: none; }
+.edit-canvas.editing[data-tool="fill"] { cursor: crosshair; }
+.brush-cursor {
+  position: absolute;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #000, inset 0 0 0 1px #000;
+  pointer-events: none;
+}
+
 .island-overlay,
 .island-boxes {
   position: absolute;
