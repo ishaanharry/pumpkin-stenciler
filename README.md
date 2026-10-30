@@ -27,7 +27,9 @@ shaved partway.
    edits. Everything below works from this final raster.
 2. **Hand edits** (`static/editor.js`): paint on the Stencil tab with a
    brush, eraser (paints uncarved skin over anything), restore (removes
-   hand edits, back to automatic) or fill. Clicking a piece the check
+   hand edits, back to automatic), or fill. Restore only reverts what's
+   under the brush; the Clear edits button reverts every hand edit on the
+   page at once. Both can be undone. Clicking a piece the check
    highlighted fills exactly that piece. Edits are stored per page as
    `edits-N.png` (gray = shade painted, alpha = edited), in output shades, so
    moving thresholds or flipping colors never changes them. Stencil settings
