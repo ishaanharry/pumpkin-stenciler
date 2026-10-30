@@ -14,6 +14,7 @@ const previewImg = $("preview-img");
 const tabOriginal = $("tab-original");
 const tabSegmented = $("tab-segmented");
 const tabSvg = $("tab-svg");
+const tabGlow = $("tab-glow");
 const preview = document.querySelector(".preview");
 const previewStack = $("preview-stack");
 const shadeButtons = $("shade-buttons");
@@ -35,7 +36,7 @@ const state = {
   uploads: [],
   upload: null,
   page: 1,
-  view: "segmented", // "original" | "segmented" (the editable stencil) | "svg"
+  view: "segmented", // "original" | "segmented" (the editable stencil) | "svg" | "glow"
   // Stencil settings per page, keyed by `${uploadId}:${page}`; saved on the server.
   settings: new Map(),
   histograms: new Map(),
@@ -201,7 +202,7 @@ function setView(view) {
 }
 
 // After a segmentation change, make sure the preview shows its effect. The SVG
-// view reflects segmentation too, so it stays put.
+// and glow views reflect segmentation too, so they stay put.
 function showProcessed() {
   if (state.view === "original") state.view = "segmented";
 }
@@ -209,6 +210,7 @@ function showProcessed() {
 tabOriginal.addEventListener("click", () => setView("original"));
 tabSegmented.addEventListener("click", () => setView("segmented"));
 tabSvg.addEventListener("click", () => setView("svg"));
+tabGlow.addEventListener("click", () => setView("glow"));
 
 function pageUrl() {
   return state.upload.pages[state.page - 1];
@@ -242,11 +244,21 @@ function svgUrl() {
   return `${pageUrl()}/svg?${stencilQuery()}&smoothness=${s.smoothness}${editsQuery()}`;
 }
 
+// The carved pumpkin lit from inside (glow.py).
+function glowUrl() {
+  return `${pageUrl()}/glow?${stencilQuery()}${editsQuery()}`;
+}
+
 function renderPreview() {
   tabOriginal.setAttribute("aria-selected", String(state.view === "original"));
   tabSegmented.setAttribute("aria-selected", String(state.view === "segmented"));
   tabSvg.setAttribute("aria-selected", String(state.view === "svg"));
-  const src = { original: pageUrl, segmented: stencilBaseUrl, svg: svgUrl }[state.view]();
+  tabGlow.setAttribute("aria-selected", String(state.view === "glow"));
+  // Problem highlights would spoil the look of the lit pumpkin.
+  previewStack.classList.toggle("glow-view", state.view === "glow");
+  const src = { original: pageUrl, segmented: stencilBaseUrl, svg: svgUrl, glow: glowUrl }[
+    state.view
+  ]();
   // Compare against the attribute: `.src` is normalised to an absolute URL.
   if (previewImg.getAttribute("src") !== src) {
     preview.classList.add("loading");

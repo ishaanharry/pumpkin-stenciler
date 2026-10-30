@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import segment, stencil, uploads, validate, vectorize
+from . import glow, segment, stencil, uploads, validate, vectorize
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -99,6 +99,21 @@ def get_segmented(
     buffer = io.BytesIO()
     # Speed matters more than file size here: this is re-rendered as sliders move.
     Image.fromarray(result.values).save(buffer, format="PNG", compress_level=1)
+    return Response(buffer.getvalue(), media_type="image/png", headers=_CACHE_HEADERS)
+
+
+@app.get("/api/uploads/{upload_id}/pages/{page}/glow")
+def get_glow(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    invert: bool = False,
+    speckle: int = Query(stencil.DEFAULT_SPECKLE, ge=0, le=stencil.MAX_SPECKLE),
+):
+    """A PNG of how the carved pumpkin looks lit from inside."""
+    result = _build_stencil(upload_id, page, thresholds, invert, speckle)
+    buffer = io.BytesIO()
+    glow.render(result).save(buffer, format="PNG", compress_level=1)
     return Response(buffer.getvalue(), media_type="image/png", headers=_CACHE_HEADERS)
 
 

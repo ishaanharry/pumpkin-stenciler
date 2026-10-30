@@ -456,6 +456,8 @@ a.btn { text-decoration: none; }
   height: 100%;
   pointer-events: none;
 }
+.glow-view .island-overlay,
+.glow-view .island-boxes { display: none; }
 .island-box {
   position: absolute;
   /* Padding keeps tiny pieces visible at reduced zoom. */

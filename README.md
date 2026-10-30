@@ -50,6 +50,11 @@ shaved partway.
    the edge hang by thin bridges, which are highlighted. Thin dead ends are
    ignored, since losing one doesn't drop a piece. PDFs default to their
    physical page width; images default to 8 in.
+5. **Glow preview** (`glow.py`): the Glow tab shows the final stencil as a
+   carved pumpkin lit from inside. Cuts glow bright orange (hotter in the
+   middle of wide openings), shaved grays glow red, dimmer the more skin is
+   left, and uncarved skin stays dark. A soft halo bleeds light past the
+   edges.
 
 ## Editor shortcuts
 
