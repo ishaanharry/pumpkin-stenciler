@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import glow, segment, stencil, uploads, validate, vectorize
+from . import glow, pdf, segment, stencil, uploads, validate, vectorize
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -135,6 +135,27 @@ def get_svg(
     except vectorize.VectorizeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return Response(svg, media_type="image/svg+xml", headers=_CACHE_HEADERS)
+
+
+@app.get("/api/uploads/{upload_id}/pages/{page}/pdf")
+def get_pdf(
+    upload_id: str,
+    page: int,
+    thresholds: str,
+    width_mm: float = Query(gt=0, le=5000),
+    invert: bool = False,
+    speckle: int = Query(stencil.DEFAULT_SPECKLE, ge=0, le=stencil.MAX_SPECKLE),
+    smoothness: int = Query(
+        vectorize.DEFAULT_SMOOTHNESS, ge=0, le=vectorize.MAX_SMOOTHNESS
+    ),
+):
+    """The traced stencil as a vector PDF, width_mm wide when printed at 100%."""
+    result = _build_stencil(upload_id, page, thresholds, invert, speckle)
+    try:
+        data = pdf.render(result, smoothness, width_mm)
+    except vectorize.VectorizeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(data, media_type="application/pdf", headers=_CACHE_HEADERS)
 
 
 @app.get("/api/uploads/{upload_id}/pages/{page}/check")

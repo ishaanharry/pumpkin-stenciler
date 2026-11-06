@@ -23,6 +23,7 @@ const thresholdSliders = $("threshold-sliders");
 const downloadBtn = $("download-btn");
 const invertToggle = $("invert-toggle");
 const downloadSvgBtn = $("download-svg-btn");
+const downloadPdfBtn = $("download-pdf-btn");
 
 // Mirrors MIN_SHADES / MAX_SHADES in segment.py.
 const MIN_SHADES = 2;
@@ -244,6 +245,12 @@ function svgUrl() {
   return `${pageUrl()}/svg?${stencilQuery()}&smoothness=${s.smoothness}${editsQuery()}`;
 }
 
+// The SVG's shapes as a PDF that prints at the stencil's printed width.
+function pdfUrl() {
+  const s = currentSettings();
+  return `${pageUrl()}/pdf?${stencilQuery()}&smoothness=${s.smoothness}&width_mm=${s.widthMm.toFixed(2)}${editsQuery()}`;
+}
+
 // The carved pumpkin lit from inside (glow.py).
 function glowUrl() {
   return `${pageUrl()}/glow?${stencilQuery()}${editsQuery()}`;
@@ -350,6 +357,7 @@ for (const [input, key, min] of [
     if (input.value === "" || !(value >= min)) return; // leave the last valid value
     currentSettings()[key] = value * MM_PER_UNIT[state.unit];
     settingsChanged();
+    updateDownload(); // the PDF is sized to the printed width
     scheduleCheck();
   });
   // Tidy up rejected or unrounded entries once the field is left.
@@ -682,6 +690,8 @@ function updateDownload() {
   downloadBtn.download = `${base}${suffix}-stencil.png`;
   downloadSvgBtn.href = svgUrl();
   downloadSvgBtn.download = `${base}${suffix}-stencil.svg`;
+  downloadPdfBtn.href = pdfUrl();
+  downloadPdfBtn.download = `${base}${suffix}-stencil.pdf`;
 }
 
 // ---- Histogram ----------------------------------------------------------

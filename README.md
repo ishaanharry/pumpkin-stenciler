@@ -38,6 +38,10 @@ shaved partway.
    [vtracer](https://github.com/visioncortex/vtracer). The SVG has a
    background `<rect>` plus one `<g id="shade-N">` per higher shade, each
    holding everything at or above it, so the layers stack without gaps.
+
+   The same shapes are also written as a vector PDF (`pdf.py`) whose page is
+   exactly the printed width set under Check, so printing it at 100%
+   ("Actual size") gives a stencil of the right size.
 4. **Check** (`validate.py`): find unsupported pieces, i.e. material that
    would fall out. Black is always the cut-through color; white (skin) and
    grays (shaved) are material. Any region of material not connected to the

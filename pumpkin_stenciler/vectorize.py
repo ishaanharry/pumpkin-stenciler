@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from xml.sax.saxutils import quoteattr
 
 import numpy as np
@@ -31,30 +32,44 @@ class VectorizeError(ValueError):
     """The image couldn't be traced; the message is safe to show the user."""
 
 
-def vectorize(stencil: Stencil, smoothness: int = DEFAULT_SMOOTHNESS) -> str:
-    """Return SVG markup for the stencil.
+@dataclass
+class Layer:
+    level: int  # shade index; the layer holds every pixel at or above it
+    threshold: int  # brightness where this shade's band starts
+    shade: int  # output gray value
+    paths: list[tuple[str, str | None]]  # (SVG path data, transform or None)
+
+
+def trace(stencil: Stencil, smoothness: int = DEFAULT_SMOOTHNESS) -> list[Layer]:
+    """Trace each shade above the background into paths, bottom-up.
 
     smoothness: 0-100; higher rounds off more corners and small wiggles.
     """
+    return [
+        Layer(level, threshold, stencil.shades[level], _trace(stencil.layer(level), smoothness))
+        for level, threshold in enumerate(stencil.thresholds, start=1)
+    ]
+
+
+def vectorize(stencil: Stencil, smoothness: int = DEFAULT_SMOOTHNESS) -> str:
+    """Return SVG markup for the stencil."""
     height, width = stencil.levels.shape
-    shades = stencil.shades
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}">',
-        f'<rect id="shade-0" width="{width}" height="{height}" fill="{_hex(shades[0])}"/>',
+        f'<rect id="shade-0" width="{width}" height="{height}" fill="{_hex(stencil.shades[0])}"/>',
     ]
-    for level, threshold in enumerate(stencil.thresholds, start=1):
-        paths = _trace(stencil.layer(level), smoothness)
+    for layer in trace(stencil, smoothness):
         parts.append(
-            f'<g id="shade-{level}" data-min-brightness="{threshold}" '
-            f'fill="{_hex(shades[level])}" fill-rule="evenodd">'
+            f'<g id="shade-{layer.level}" data-min-brightness="{layer.threshold}" '
+            f'fill="{_hex(layer.shade)}" fill-rule="evenodd">'
         )
         parts.extend(
             f"<path d={quoteattr(d)}"
             + (f" transform={quoteattr(transform)}" if transform else "")
             + "/>"
-            for d, transform in paths
+            for d, transform in layer.paths
         )
         parts.append("</g>")
     parts.append("</svg>")
